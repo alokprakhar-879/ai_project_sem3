@@ -1,0 +1,6 @@
+numpy
+matplotlib
+pandas
+pygame-ce
+streamlit
+plotly

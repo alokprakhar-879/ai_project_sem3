@@ -1,0 +1,465 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>🚦 Adaptive Traffic Signal Control — RL Demo</title>
+<style>
+  :root{
+    --bg:#0f1117;--card:#1a1d27;--accent:#00e5ff;--green:#00e676;
+    --red:#ff1744;--yellow:#ffd600;--text:#e0e0e0;--muted:#8899aa;
+    --border:#2a2d3a;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--text);font-family:'Segoe UI',system-ui,sans-serif;min-height:100vh}
+
+  /* ── Header ── */
+  header{background:linear-gradient(135deg,#0d1b2a,#1a2744);
+         padding:18px 32px;display:flex;align-items:center;gap:16px;
+         border-bottom:1px solid var(--border);box-shadow:0 2px 20px #0008}
+  header h1{font-size:1.4rem;font-weight:700;color:#fff;letter-spacing:.5px}
+  header span{font-size:.8rem;background:#00e5ff22;color:var(--accent);
+              padding:3px 10px;border-radius:20px;border:1px solid var(--accent)44}
+
+  /* ── Layout ── */
+  main{display:grid;grid-template-columns:1fr 340px;gap:0;height:calc(100vh - 68px)}
+  .left{padding:20px;display:flex;flex-direction:column;gap:14px;overflow:auto}
+  .right{background:var(--card);border-left:1px solid var(--border);
+         padding:16px;display:flex;flex-direction:column;gap:14px;overflow:auto}
+
+  /* ── Canvas area ── */
+  .canvas-wrap{position:relative;border-radius:14px;overflow:hidden;
+               border:1px solid var(--border);background:#111}
+  canvas{display:block;width:100%;height:auto}
+  #overlay{position:absolute;inset:0;display:flex;align-items:center;
+            justify-content:center;background:#000b;flex-direction:column;gap:12px}
+  #overlay h2{font-size:1.6rem;color:#fff}
+  #overlay p{color:var(--muted);font-size:.9rem}
+
+  /* ── Buttons ── */
+  .btn-row{display:flex;gap:10px;flex-wrap:wrap}
+  button{padding:10px 22px;border-radius:8px;border:none;font-size:.85rem;
+         font-weight:600;cursor:pointer;transition:.2s;letter-spacing:.3px}
+  #btnAI  {background:linear-gradient(135deg,#00c6ff,#0072ff);color:#fff}
+  #btnFixed{background:linear-gradient(135deg,#f093fb,#f5576c);color:#fff}
+  #btnStop {background:#2a2d3a;color:var(--muted);border:1px solid var(--border)}
+  button:hover{opacity:.85;transform:translateY(-1px)}
+  button:disabled{opacity:.4;cursor:not-allowed;transform:none}
+
+  /* ── Stats strip ── */
+  .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+  .stat{background:var(--card);border:1px solid var(--border);border-radius:10px;
+        padding:10px;text-align:center}
+  .stat .val{font-size:1.4rem;font-weight:700;color:var(--accent)}
+  .stat .lbl{font-size:.7rem;color:var(--muted);margin-top:2px;text-transform:uppercase}
+
+  /* ── Progress bar ── */
+  .prog-wrap{background:#1a1d27;border-radius:6px;height:8px;overflow:hidden;
+             border:1px solid var(--border)}
+  #progBar{height:100%;background:linear-gradient(90deg,#00e5ff,#00e676);
+           transition:width .3s;width:0%}
+
+  /* ── Right panel ── */
+  .panel-title{font-size:.7rem;text-transform:uppercase;letter-spacing:1px;
+               color:var(--muted);margin-bottom:6px}
+  .lights-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  .light-box{background:#111;border-radius:8px;border:1px solid var(--border);
+             padding:10px;text-align:center}
+  .light-box .dir{font-size:.7rem;color:var(--muted);margin-bottom:6px}
+  .bulb{width:24px;height:24px;border-radius:50%;margin:0 auto;
+        box-shadow:0 0 12px currentColor}
+  .bulb.GREEN{background:var(--green);color:var(--green)}
+  .bulb.RED  {background:var(--red);color:var(--red)}
+  .bulb.YELLOW{background:var(--yellow);color:var(--yellow)}
+
+  /* ── Queue bars ── */
+  .queue-row{display:flex;align-items:center;gap:8px;margin:3px 0}
+  .queue-label{width:16px;font-size:.75rem;color:var(--muted)}
+  .queue-track{flex:1;background:#111;border-radius:4px;height:12px;overflow:hidden}
+  .queue-fill{height:100%;border-radius:4px;transition:width .3s;min-width:2px}
+  .N-fill{background:#ff6464}.S-fill{background:#6464ff}
+  .E-fill{background:#64c864}.W-fill{background:#ffff64}
+  .queue-num{width:24px;font-size:.75rem;text-align:right}
+
+  /* ── Results table ── */
+  .results-table{width:100%;border-collapse:collapse;font-size:.78rem}
+  .results-table th{color:var(--muted);text-align:left;padding:4px 6px;
+                     border-bottom:1px solid var(--border);font-weight:500}
+  .results-table td{padding:5px 6px;border-bottom:1px solid #1f2232}
+  .results-table .ai{color:var(--green)}.results-table .fx{color:#82aaff}
+  .badge{font-size:.65rem;padding:2px 7px;border-radius:10px;font-weight:700}
+  .badge.better{background:#00e67622;color:var(--green);border:1px solid var(--green)44}
+  .badge.worse {background:#ff174422;color:var(--red);  border:1px solid var(--red)44}
+
+  /* ── Mini chart ── */
+  #miniChart{width:100%;height:90px;border-radius:8px;background:#111;
+             border:1px solid var(--border)}
+
+  /* ── Mode pill ── */
+  #modePill{display:inline-block;padding:4px 14px;border-radius:20px;
+            font-size:.75rem;font-weight:600}
+  .mode-ai   {background:#00e57622;color:var(--green);border:1px solid #00e67644}
+  .mode-fixed{background:#f5576c22;color:#f5576c;   border:1px solid #f5576c44}
+  .mode-idle {background:#2a2d3a;  color:var(--muted);border:1px solid var(--border)}
+
+  /* ── Footer note ── */
+  .note{font-size:.7rem;color:var(--muted);text-align:center;padding:6px 0}
+
+  @media(max-width:800px){
+    main{grid-template-columns:1fr}
+    .right{border-left:none;border-top:1px solid var(--border)}
+    .stats{grid-template-columns:repeat(2,1fr)}
+  }
+</style>
+</head>
+<body>
+<header>
+  <div>🚦</div>
+  <h1>Adaptive Traffic Signal Control</h1>
+  <span>Reinforcement Learning Demo</span>
+  <div style="margin-left:auto">
+    <span id="modePill" class="mode-idle">Idle</span>
+  </div>
+</header>
+
+<main>
+  <!-- Left column -->
+  <div class="left">
+    <div class="btn-row">
+      <button id="btnAI"   onclick="startSim(true)">▶ Run AI Control</button>
+      <button id="btnFixed" onclick="startSim(false)">▶ Run Fixed-Time</button>
+      <button id="btnStop" onclick="stopSim()" disabled>⏹ Stop</button>
+    </div>
+
+    <div class="prog-wrap">
+      <div id="progBar"></div>
+    </div>
+
+    <div class="stats">
+      <div class="stat"><div class="val" id="sCrossed">0</div><div class="lbl">Crossed</div></div>
+      <div class="stat"><div class="val" id="sWaiting">0</div><div class="lbl">Waiting</div></div>
+      <div class="stat"><div class="val" id="sFrame">0</div><div class="lbl">Frame</div></div>
+      <div class="stat"><div class="val" id="sEps">—</div><div class="lbl">Epsilon</div></div>
+    </div>
+
+    <div class="canvas-wrap">
+      <canvas id="simCanvas" width="{{ window_w }}" height="{{ window_h }}"></canvas>
+      <div id="overlay">
+        <h2>🚦 Traffic Sim</h2>
+        <p>Press <strong>Run AI Control</strong> or <strong>Run Fixed-Time</strong> to begin</p>
+      </div>
+    </div>
+
+    <div id="resultsArea" style="display:none">
+      <div class="panel-title">📊 Performance Comparison</div>
+      <table class="results-table">
+        <thead><tr>
+          <th>Metric</th><th class="ai">AI-Based</th><th class="fx">Fixed-Time</th><th>Verdict</th>
+        </tr></thead>
+        <tbody id="resultsBody"></tbody>
+      </table>
+      <div class="note">Run both modes to see the full comparison ↑</div>
+    </div>
+  </div>
+
+  <!-- Right column -->
+  <div class="right">
+    <div>
+      <div class="panel-title">🚥 Signal State</div>
+      <div class="lights-grid">
+        <div class="light-box"><div class="dir">NORTH</div><div class="bulb RED" id="lN"></div></div>
+        <div class="light-box"><div class="dir">SOUTH</div><div class="bulb RED" id="lS"></div></div>
+        <div class="light-box"><div class="dir">EAST</div> <div class="bulb RED" id="lE"></div></div>
+        <div class="light-box"><div class="dir">WEST</div> <div class="bulb RED" id="lW"></div></div>
+      </div>
+    </div>
+
+    <div>
+      <div class="panel-title">🚗 Queue Length</div>
+      <div id="queueBars">
+        <div class="queue-row"><div class="queue-label">N</div><div class="queue-track"><div class="queue-fill N-fill" id="qN" style="width:0%"></div></div><div class="queue-num" id="qNn">0</div></div>
+        <div class="queue-row"><div class="queue-label">S</div><div class="queue-track"><div class="queue-fill S-fill" id="qS" style="width:0%"></div></div><div class="queue-num" id="qSn">0</div></div>
+        <div class="queue-row"><div class="queue-label">E</div><div class="queue-track"><div class="queue-fill E-fill" id="qE" style="width:0%"></div></div><div class="queue-num" id="qEn">0</div></div>
+        <div class="queue-row"><div class="queue-label">W</div><div class="queue-track"><div class="queue-fill W-fill" id="qW" style="width:0%"></div></div><div class="queue-num" id="qWn">0</div></div>
+      </div>
+    </div>
+
+    <div>
+      <div class="panel-title">📈 Vehicles Crossed Over Time</div>
+      <canvas id="miniChart"></canvas>
+    </div>
+
+    <div>
+      <div class="panel-title">ℹ️ How It Works</div>
+      <div style="font-size:.75rem;color:var(--muted);line-height:1.6">
+        <p><strong style="color:var(--text)">AI Mode:</strong> A Q-Learning agent observes vehicle queues (N/S/E/W) and chooses which lane gets the green light. It learns to minimize total waiting time through trial-and-error rewards.</p>
+        <br/>
+        <p><strong style="color:var(--text)">Fixed-Time Mode:</strong> Classic round-robin cycling — each direction gets equal green time regardless of queue length.</p>
+        <br/>
+        <p><strong style="color:var(--text)">State:</strong> 81 states (3 density bins × 4 dirs)<br/>
+           <strong style="color:var(--text)">Actions:</strong> 4 (choose green direction)<br/>
+           <strong style="color:var(--text)">Reward:</strong> −(total waiting vehicles)</p>
+      </div>
+    </div>
+  </div>
+</main>
+
+<script>
+// ── Constants (from Flask) ───────────────────────────────────────────────────
+const TF   = {{ total_frames }};
+const WW   = {{ window_w }};
+const WH   = {{ window_h }};
+const IX   = {{ inter_x }};
+const IY   = {{ inter_y }};
+const IS   = {{ inter_size }};
+const RW   = {{ road_w }};
+const VL   = 18, VW_ = 10;
+
+// ── Canvas setup ─────────────────────────────────────────────────────────────
+const canvas = document.getElementById('simCanvas');
+const ctx    = canvas.getContext('2d');
+canvas.width = WW; canvas.height = WH;
+
+let animId   = null;
+let simData  = null;
+let running  = false;
+let chartHistory = [];
+
+// ── Color palette ─────────────────────────────────────────────────────────────
+const VCOLORS = {N:'#ff6464',S:'#6464ff',E:'#64c864',W:'#ffff64'};
+const LCOLORS = {GREEN:'#00e676',RED:'#ff1744',YELLOW:'#ffd600'};
+
+// ── Draw intersection ────────────────────────────────────────────────────────
+function drawScene(data){
+  ctx.clearRect(0,0,WW,WH);
+
+  // Sky gradient bg
+  const bg = ctx.createLinearGradient(0,0,0,WH);
+  bg.addColorStop(0,'#0f1117'); bg.addColorStop(1,'#141820');
+  ctx.fillStyle=bg; ctx.fillRect(0,0,WW,WH);
+
+  // Roads
+  ctx.fillStyle='#2a2d3a';
+  // vertical
+  ctx.fillRect(IX-RW/2, 0, RW, IY-IS/2);
+  ctx.fillRect(IX-RW/2, IY+IS/2, RW, WH-IY-IS/2);
+  // horizontal
+  ctx.fillRect(0, IY-RW/2, IX-IS/2, RW);
+  ctx.fillRect(IX+IS/2, IY-RW/2, WW-IX-IS/2, RW);
+  // intersection box
+  ctx.fillRect(IX-IS/2, IY-IS/2, IS, IS);
+
+  // Road center dashes
+  ctx.setLineDash([20,20]); ctx.strokeStyle='#ffffff22'; ctx.lineWidth=2;
+  // vertical center
+  ctx.beginPath(); ctx.moveTo(IX,0); ctx.lineTo(IX,WH); ctx.stroke();
+  // horizontal center
+  ctx.beginPath(); ctx.moveTo(0,IY); ctx.lineTo(WW,IY); ctx.stroke();
+  ctx.setLineDash([]);
+
+  // Road edges / shoulders
+  ctx.strokeStyle='#ffffff15'; ctx.lineWidth=1;
+  [[IX-RW/2,0,IX-RW/2,WH],[IX+RW/2,0,IX+RW/2,WH],
+   [0,IY-RW/2,WW,IY-RW/2],[0,IY+RW/2,WW,IY+RW/2]].forEach(([x1,y1,x2,y2])=>{
+    ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x2,y2); ctx.stroke();
+  });
+
+  if(!data) return;
+
+  // Vehicles
+  const dirs = {
+    N:v=>[IX-RW/2+15, v.pos, VL, VW_],
+    S:v=>[IX+RW/2-25, v.pos, VL, VW_],
+    E:v=>[v.pos, IY-RW/2+15, VW_, VL],
+    W:v=>[v.pos, IY+RW/2-25, VW_, VL],
+  };
+  for(const [d,vlist] of Object.entries(data.vehicles)){
+    ctx.fillStyle = VCOLORS[d];
+    for(const v of vlist){
+      const [x,y,w,h] = dirs[d](v);
+      ctx.beginPath();
+      ctx.roundRect(x,y,w,h,3);
+      ctx.fill();
+      // windshield shimmer
+      ctx.fillStyle='#ffffff33';
+      ctx.fillRect(x+2,y+2,w-4,3);
+      ctx.fillStyle = VCOLORS[d];
+    }
+  }
+
+  // Traffic lights
+  const lpos = {N:[IX-55,IY-100],S:[IX+55,IY+100],E:[IX+100,IY-55],W:[IX-100,IY+55]};
+  for(const [d,[lx,ly]] of Object.entries(lpos)){
+    const state = data.lights[d];
+    // housing
+    ctx.fillStyle='#111'; ctx.strokeStyle='#333'; ctx.lineWidth=1;
+    ctx.beginPath(); ctx.roundRect(lx-9,ly-9,18,18,4); ctx.fill(); ctx.stroke();
+    // bulb
+    ctx.fillStyle = LCOLORS[state];
+    ctx.shadowColor = LCOLORS[state]; ctx.shadowBlur = state==='RED'?0:16;
+    ctx.beginPath(); ctx.arc(lx,ly,7,0,Math.PI*2); ctx.fill();
+    ctx.shadowBlur=0;
+    // direction label
+    ctx.fillStyle='#aaa'; ctx.font='10px monospace'; ctx.textAlign='center';
+    ctx.fillText(d, lx, ly+(d==='N'||d==='S'?22:-14));
+  }
+
+  // Direction arrows
+  ctx.fillStyle='#ffffff18'; ctx.font='bold 20px sans-serif'; ctx.textAlign='center';
+  ctx.fillText('↓',IX, 30);
+  ctx.fillText('↑',IX, WH-10);
+  ctx.fillText('←',WW-20, IY+6);
+  ctx.fillText('→',20, IY+6);
+}
+
+// ── UI update helpers ────────────────────────────────────────────────────────
+function updateUI(data){
+  // stats strip
+  document.getElementById('sCrossed').textContent = data.crossed;
+  document.getElementById('sWaiting').textContent = data.waiting;
+  document.getElementById('sFrame').textContent   = data.frame;
+  document.getElementById('sEps').textContent     = data.use_ai ? data.epsilon : '—';
+
+  // progress
+  document.getElementById('progBar').style.width = (data.frame/TF*100)+'%';
+
+  // lights
+  for(const d of ['N','S','E','W']){
+    const el = document.getElementById('l'+d);
+    el.className = 'bulb '+data.lights[d];
+  }
+
+  // queue bars
+  const counts = {N:data.vehicles.N.length,S:data.vehicles.S.length,
+                  E:data.vehicles.E.length,W:data.vehicles.W.length};
+  const mx = Math.max(...Object.values(counts), 1);
+  for(const d of ['N','S','E','W']){
+    document.getElementById('q'+d).style.width = (counts[d]/mx*100)+'%';
+    document.getElementById('q'+d+'n').textContent = counts[d];
+  }
+
+  // mode pill
+  const pill = document.getElementById('modePill');
+  pill.textContent = data.running ? (data.use_ai?'AI Mode':'Fixed-Time') : 'Done';
+  pill.className   = 'mode-'+(data.running?(data.use_ai?'ai':'fixed'):'idle');
+
+  // mini chart
+  if(data.history && data.history.length>0){
+    chartHistory = data.history;
+    drawMiniChart(data.history);
+  }
+}
+
+function drawMiniChart(history){
+  const c = document.getElementById('miniChart');
+  const cx = c.getContext('2d');
+  cx.clearRect(0,0,c.width,c.height);
+  if(history.length<2) return;
+  const mx = Math.max(...history.map(h=>h.crossed), 1);
+  const pad=10;
+  cx.strokeStyle='#00e676'; cx.lineWidth=2;
+  cx.beginPath();
+  history.forEach((h,i)=>{
+    const x = pad + (i/(history.length-1))*(c.width-pad*2);
+    const y = c.height - pad - (h.crossed/mx)*(c.height-pad*2);
+    i===0 ? cx.moveTo(x,y) : cx.lineTo(x,y);
+  });
+  cx.stroke();
+  // gradient fill
+  cx.lineTo(c.width-pad, c.height-pad);
+  cx.lineTo(pad, c.height-pad);
+  cx.closePath();
+  cx.fillStyle='#00e67618'; cx.fill();
+  // axis label
+  cx.fillStyle='#8899aa'; cx.font='9px sans-serif';
+  cx.fillText('Vehicles crossed →',pad+2,c.height-2);
+}
+
+function updateResults(data){
+  const ai = data.ai_results;
+  const fx = data.fixed_results;
+  if(!ai && !fx) return;
+  document.getElementById('resultsArea').style.display='block';
+  const tbody = document.getElementById('resultsBody');
+
+  const rows = [
+    ['Vehicles Crossed', ai?.crossed, fx?.crossed, 'higher'],
+    ['Total Delay (frames)', ai?.delay, fx?.delay, 'lower'],
+    ['Avg Wait Time', ai?.avg_wait, fx?.avg_wait, 'lower'],
+    ['Final Queue Length', ai?.queue, fx?.queue, 'lower'],
+  ];
+
+  tbody.innerHTML = rows.map(([label,av,fv,better])=>{
+    let badge='';
+    if(av!=null && fv!=null){
+      const aiWins = better==='higher' ? av>fv : av<fv;
+      badge=`<span class="badge ${aiWins?'better':'worse'}">${aiWins?'AI wins':'Fixed wins'}</span>`;
+    }
+    const fmtAI  = av!=null ? (Number.isInteger(av)?av:av.toFixed(2)) : '—';
+    const fmtFix = fv!=null ? (Number.isInteger(fv)?fv:fv.toFixed(2)) : '—';
+    return `<tr>
+      <td>${label}</td>
+      <td class="ai">${fmtAI}</td>
+      <td class="fx">${fmtFix}</td>
+      <td>${badge}</td>
+    </tr>`;
+  }).join('');
+}
+
+// ── Simulation loop ──────────────────────────────────────────────────────────
+let frameDelay = 1;  // ms between fetch calls
+
+async function tick(){
+  if(!running) return;
+  try{
+    const res  = await fetch('/api/step',{method:'POST',
+                  headers:{'Content-Type':'application/json'},
+                  body:JSON.stringify({steps:5})});
+    const data = await res.json();
+    simData = data;
+    drawScene(data);
+    updateUI(data);
+    updateResults(data);
+
+    if(data.running){
+      animId = setTimeout(tick, frameDelay);
+    } else {
+      running=false;
+      setButtons(false);
+    }
+  } catch(e){
+    console.error(e);
+    running=false; setButtons(false);
+  }
+}
+
+function setButtons(isRunning){
+  document.getElementById('btnAI').disabled    = isRunning;
+  document.getElementById('btnFixed').disabled = isRunning;
+  document.getElementById('btnStop').disabled  = !isRunning;
+}
+
+async function startSim(useAI){
+  if(animId) clearTimeout(animId);
+  chartHistory=[];
+  document.getElementById('overlay').style.display='none';
+  await fetch('/api/start',{method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({use_ai:useAI})});
+  running=true;
+  setButtons(true);
+  tick();
+}
+
+function stopSim(){
+  running=false;
+  if(animId) clearTimeout(animId);
+  setButtons(false);
+}
+
+// Initial draw
+drawScene(null);
+</script>
+</body>
+</html>
+
