@@ -36,10 +36,6 @@ def train_agent(num_episodes=50, frames_per_episode=2000, save_path=Q_TABLE_PATH
     # Initialize simulation in training mode
     sim = TrafficSimulation(mode='train', load_model=True)
 
-    # Override frames per episode
-    global SIMULATION_FRAMES
-    SIMULATION_FRAMES = frames_per_episode
-
     try:
         for episode in range(num_episodes):
             sim.reset()
@@ -110,7 +106,6 @@ def evaluate_agent(frames=3000, load_path=Q_TABLE_PATH, spawn_prob=BASE_SPAWN_PR
                             spawn_prob=spawn_prob,
                             emergency_prob=emergency_prob,
                             pedestrian_prob=pedestrian_prob)
-    SIMULATION_FRAMES = frames
 
     pygame.init()
     screen = pygame.display.set_mode((WINDOW_WIDTH, WINDOW_HEIGHT))
@@ -150,7 +145,6 @@ def run_fixed_time_baseline(frames=3000, spawn_prob=BASE_SPAWN_PROB):
     print("=" * 60)
 
     sim = TrafficSimulation(mode='fixed', spawn_prob=spawn_prob)
-    SIMULATION_FRAMES = frames
 
     pygame.init()
     screen = pygame.display.set_mode((WINDOW_WIDTH, WINDOW_HEIGHT))

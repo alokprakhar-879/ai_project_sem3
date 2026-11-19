@@ -1,4 +1,4 @@
-"""Streamlit Interactive Dashboard for Adaptive Traffic Signal Control - User Friendly"""
+"""Streamlit Interactive Dashboard for Adaptive Traffic Signal Control - Upgraded"""
 
 import os
 import sys
@@ -40,7 +40,7 @@ st.markdown("""
         padding: 1rem;
         border-radius: 8px;
         border-left: 4px solid #2a5298;
-        margin-bottom: 1rem;
+        margin-bottom: 0.5rem;
     }
     .emergency-alert {
         background: #ffe6e6;
@@ -48,12 +48,12 @@ st.markdown("""
         border-radius: 8px;
         padding: 1rem;
         margin-bottom: 1rem;
-        animation: pulse 2s infinite;
+        animation: pulse 1.5s infinite;
     }
     @keyframes pulse {
-        0% { background-color: #ffe6e6; }
-        50% { background-color: #ffcccc; }
-        100% { background-color: #ffe6e6; }
+        0% { background-color: #ffe6e6; box-shadow: 0 0 0 0 rgba(255, 68, 68, 0.4); }
+        70% { background-color: #ffcccc; box-shadow: 0 0 0 10px rgba(255, 68, 68, 0); }
+        100% { background-color: #ffe6e6; box-shadow: 0 0 0 0 rgba(255, 68, 68, 0); }
     }
     .success-box {
         background: #e6ffe6;
@@ -66,19 +66,41 @@ st.markdown("""
         margin: 2rem 0;
         border-top: 2px solid #e0e0e0;
     }
-    .simulation-container {
+    .decision-box {
+        background: #f0f8ff;
+        border: 2px solid #4a90e2;
+        border-radius: 8px;
+        padding: 1rem;
+        margin-bottom: 1rem;
+    }
+    .q-value-card {
         background: #ffffff;
-        border: 2px solid #d0d0d0;
-        border-radius: 10px;
-        padding: 1.5rem;
-        margin-bottom: 1.5rem;
+        border: 1px solid #d0d0d0;
+        border-radius: 6px;
+        padding: 0.75rem;
+        margin-bottom: 0.5rem;
     }
-    .control-panel {
-        background: #f0f4f8;
-        border-radius: 10px;
-        padding: 1.5rem;
-        margin-bottom: 1.5rem;
+    .q-value-best {
+        background: #e8f5e9;
+        border: 2px solid #4caf50;
     }
+    .direction-stats {
+        display: flex;
+        justify-content: space-between;
+        margin-bottom: 1rem;
+    }
+    .direction-card {
+        flex: 1;
+        padding: 0.75rem;
+        margin: 0 0.25rem;
+        border-radius: 6px;
+        text-align: center;
+        background: #f8f9fa;
+    }
+    .direction-north { border-top: 4px solid #FF6B6B; }
+    .direction-south { border-top: 4px solid #4ECDC4; }
+    .direction-east { border-top: 4px solid #45B7D1; }
+    .direction-west { border-top: 4px solid #FFA07A; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -96,10 +118,12 @@ def init_session_state():
         st.session_state.running = False
     if 'frame_count' not in st.session_state:
         st.session_state.frame_count = 0
-    if 'sim_size' not in st.session_state:
-        st.session_state.sim_size = 1.0
-    if 'auto_refresh' not in st.session_state:
-        st.session_state.auto_refresh = False
+    if 'speed_multiplier' not in st.session_state:
+        st.session_state.speed_multiplier = 1.0
+    if 'training_progress' not in st.session_state:
+        st.session_state.training_progress = 0
+    if 'training_status' not in st.session_state:
+        st.session_state.training_status = "Idle"
 
 
 def render_header():
@@ -115,52 +139,73 @@ def render_header():
 
 
 def render_sidebar():
-    """Render sidebar controls with size adjustment options."""
+    """Render sidebar controls."""
     st.sidebar.markdown("## 🛠️ Control Panel")
 
-    # === SIZE & DISPLAY SETTINGS ===
-    st.sidebar.markdown("### 📏 Display Settings")
-    sim_size = st.sidebar.slider(
-        "Simulation Display Size",
-        min_value=0.7, max_value=1.5, value=st.session_state.sim_size, step=0.1,
-        help="Adjust the size of the simulation visualization"
-    )
-    st.session_state.sim_size = sim_size
+    # === SIMULATION CONTROLS ===
+    st.sidebar.markdown("### 🎮 Simulation Controls")
 
-    chart_height = st.sidebar.slider(
-        "Chart Height (px)",
-        min_value=250, max_value=600, value=400, step=50,
-        help="Adjust height of data visualization charts"
-    )
+    col_start, col_pause = st.sidebar.columns(2)
+    with col_start:
+        start_btn = st.button("▶️ Start", use_container_width=True, key="btn_start")
+    with col_pause:
+        pause_btn = st.button("⏸️ Pause", use_container_width=True, key="btn_pause")
 
-    font_size = st.sidebar.selectbox(
-        "Text Size",
-        options=["Small", "Medium", "Large"],
-        index=1,
-        help="Adjust dashboard text readability"
-    )
+    col_restart, col_reset = st.sidebar.columns(2)
+    with col_restart:
+        restart_btn = st.button("🔄 Restart", use_container_width=True, key="btn_restart")
+    with col_reset:
+        reset_stats_btn = st.button("📊 Reset Stats", use_container_width=True, key="btn_reset_stats")
 
     st.sidebar.markdown("---")
 
-    # === SIMULATION PARAMETERS ===
-    st.sidebar.markdown("### 🚗 Traffic Parameters")
+    # === SPEED CONTROL ===
+    st.sidebar.markdown("### ⚡ Simulation Speed")
+    speed_option = st.sidebar.selectbox(
+        "Speed Multiplier",
+        options=["0.25x", "0.5x", "1x", "2x"],
+        index=2,
+        key="speed_select",
+        help="0.25x = Slow motion (clearly see each vehicle), 2x = Fast forward"
+    )
+    speed_map = {'0.25x': 0.25, '0.5x': 0.5, '1x': 1.0, '2x': 2.0}
+    speed_multiplier = speed_map[speed_option]
+
+    st.sidebar.markdown("---")
+
+    # === TRAFFIC DENSITY ===
+    st.sidebar.markdown("### 🚗 Traffic Density")
 
     spawn_rate = st.sidebar.slider(
-        "Vehicle Spawn Rate",
-        min_value=0.01, max_value=0.20, value=BASE_SPAWN_PROB, step=0.01,
+        "Overall Spawn Rate",
+        min_value=0.01, max_value=0.25, value=BASE_SPAWN_PROB, step=0.01,
+        key="spawn_rate",
         help="Probability of vehicle spawning per frame per direction"
     )
 
-    emergency_prob = st.sidebar.slider(
-        "Emergency Vehicle Probability",
-        min_value=0.0, max_value=0.15, value=EMERGENCY_SPAWN_PROB, step=0.01,
-        help="Probability of ambulance/police vehicle spawning"
-    )
+    # Per-direction density multipliers
+    st.sidebar.markdown("**Per-Direction Multipliers:**")
+    col_n, col_s = st.sidebar.columns(2)
+    with col_n:
+        north_mult = st.slider("North", 0.0, 3.0, 1.0, 0.1, key="north_mult")
+    with col_s:
+        south_mult = st.slider("South", 0.0, 3.0, 1.0, 0.1, key="south_mult")
+    col_e, col_w = st.sidebar.columns(2)
+    with col_e:
+        east_mult = st.slider("East", 0.0, 3.0, 1.0, 0.1, key="east_mult")
+    with col_w:
+        west_mult = st.slider("West", 0.0, 3.0, 1.0, 0.1, key="west_mult")
 
     pedestrian_prob = st.sidebar.slider(
-        "Pedestrian Spawn Rate",
+        "🚶 Pedestrian Spawn Rate",
         min_value=0.0, max_value=0.15, value=PEDESTRIAN_SPAWN_PROB, step=0.01,
-        help="Probability of pedestrian spawning per side"
+        key="pedestrian_prob"
+    )
+
+    emergency_prob = st.sidebar.slider(
+        "🚑 Emergency Probability",
+        min_value=0.0, max_value=0.10, value=EMERGENCY_SPAWN_PROB, step=0.01,
+        key="emergency_prob"
     )
 
     st.sidebar.markdown("---")
@@ -171,14 +216,16 @@ def render_sidebar():
         "Traffic Signal Strategy",
         options=["AI-Based (Q-Learning)", "Fixed-Time (Baseline)"],
         index=0,
-        help="Choose between AI adaptive control or traditional fixed-time signals"
+        key="mode_select"
     )
 
+    st.sidebar.markdown("---")
+
     # === Q-LEARNING PARAMETERS ===
-    with st.sidebar.expander("⚙️ Q-Learning Advanced Settings", expanded=False):
-        lr = st.slider("Learning Rate (Alpha)", 0.01, 0.5, LEARNING_RATE, 0.01)
-        gamma = st.slider("Discount Factor (Gamma)", 0.5, 0.99, DISCOUNT_FACTOR, 0.01)
-        epsilon = st.slider("Exploration (Epsilon)", 0.0, 1.0, EPSILON_START, 0.05)
+    with st.sidebar.expander("⚙️ Q-Learning Settings", expanded=False):
+        lr = st.slider("Learning Rate (Alpha)", 0.01, 0.5, LEARNING_RATE, 0.01, key="q_lr")
+        gamma = st.slider("Discount Factor (Gamma)", 0.5, 0.99, DISCOUNT_FACTOR, 0.01, key="q_gamma")
+        epsilon = st.slider("Exploration (Epsilon)", 0.0, 1.0, EPSILON_START, 0.05, key="q_epsilon")
 
     # === EMERGENCY INFO ===
     st.sidebar.markdown("---")
@@ -188,8 +235,24 @@ def render_sidebar():
     - 🚑 Ambulance
     - 🚓 Police
 
-    Emergency vehicles automatically override normal traffic signals for safe passage.
+    Emergency vehicles override normal traffic signals for safe passage.
     """)
+
+    # Handle button clicks
+    if start_btn:
+        st.session_state.running = True
+    if pause_btn:
+        st.session_state.running = False
+    if restart_btn:
+        if st.session_state.simulation:
+            st.session_state.simulation.reset(keep_q_table=True)
+        st.session_state.running = False
+        st.session_state.frame_count = 0
+    if reset_stats_btn:
+        if st.session_state.simulation:
+            st.session_state.simulation.reset(keep_q_table=True)
+        st.session_state.running = False
+        st.session_state.frame_count = 0
 
     return {
         'spawn_rate': spawn_rate,
@@ -199,9 +262,203 @@ def render_sidebar():
         'lr': lr,
         'gamma': gamma,
         'epsilon': epsilon,
-        'chart_height': chart_height,
-        'font_size': font_size,
+        'speed_multiplier': speed_multiplier,
+        'north_mult': north_mult,
+        'south_mult': south_mult,
+        'east_mult': east_mult,
+        'west_mult': west_mult,
+        'start_btn': start_btn,
+        'pause_btn': pause_btn,
+        'restart_btn': restart_btn,
+        'reset_stats_btn': reset_stats_btn,
     }
+
+
+def render_traffic_statistics(metrics):
+    """Render traffic statistics section with direction-wise breakdown."""
+    st.markdown("## 📊 Traffic Statistics")
+
+    crossed_by_dir = metrics.get('crossed_by_direction', {d: 0 for d in DIRECTIONS})
+    generated_by_dir = metrics.get('generated_by_direction', {d: 0 for d in DIRECTIONS})
+    vehicle_counts = metrics.get('vehicle_counts', [0, 0, 0, 0])
+    pedestrian_counts = metrics.get('pedestrian_counts', [0, 0, 0, 0])
+
+    # Direction cards
+    dir_config = [
+        ('N', 'North', '#FF6B6B', 'direction-north'),
+        ('S', 'South', '#4ECDC4', 'direction-south'),
+        ('E', 'East', '#45B7D1', 'direction-east'),
+        ('W', 'West', '#FFA07A', 'direction-west'),
+    ]
+
+    cols = st.columns(4)
+    for idx, (dir_key, dir_name, color, css_class) in enumerate(dir_config):
+        with cols[idx]:
+            v_count = vehicle_counts[idx] if idx < len(vehicle_counts) else 0
+            c_count = crossed_by_dir.get(dir_key, 0)
+            g_count = generated_by_dir.get(dir_key, 0)
+            p_count = pedestrian_counts[idx] if idx < len(pedestrian_counts) else 0
+
+            st.markdown(f"""
+            <div class="direction-card {css_class}">
+                <div style="font-size: 1.1rem; font-weight: bold; color: {color};">{dir_name}</div>
+                <div style="font-size: 0.9rem; margin: 0.25rem 0;">
+                    🚗 <b>{v_count}</b> waiting
+                </div>
+                <div style="font-size: 0.9rem; margin: 0.25rem 0;">
+                    ✅ <b>{c_count}</b> crossed / <b>{g_count}</b> generated
+                </div>
+                <div style="font-size: 0.85rem; color: #666;">
+                    🚶 {p_count} pedestrians
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+
+    # Summary metrics
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        st.metric("Total Generated", sum(generated_by_dir.values()))
+    with col2:
+        st.metric("Total Crossed", metrics.get('crossed_vehicles', 0))
+    with col3:
+        st.metric("Currently Waiting", metrics.get('total_vehicles', 0))
+    with col4:
+        st.metric("Avg Wait Time", f"{metrics.get('total_vehicle_waiting', 0) / max(metrics.get('crossed_vehicles', 1), 1):.1f} frames")
+
+
+def render_rl_decision_monitor(metrics, agent):
+    """Render live Q-Learning decision monitor."""
+    st.markdown("## 🧠 RL Decision Monitor")
+
+    # Current state information
+    vehicle_counts = metrics.get('vehicle_counts', [0, 0, 0, 0])
+    pedestrian_counts = metrics.get('pedestrian_counts', [0, 0, 0, 0])
+    current_phase = metrics.get('phase', 'NS_GREEN')
+    current_action = metrics.get('action', None)
+    q_values = metrics.get('q_values', None)
+    epsilon = metrics.get('epsilon', 0)
+
+    # State display
+    col1, col2 = st.columns([2, 1])
+
+    with col1:
+        st.markdown("### Current Traffic State")
+
+        # Create a visual state representation
+        state_data = {
+            'Direction': ['North', 'South', 'East', 'West'],
+            'Vehicles': vehicle_counts,
+            'Pedestrians': pedestrian_counts,
+        }
+        df_state = pd.DataFrame(state_data)
+        st.dataframe(df_state, use_container_width=True, hide_index=True)
+
+        st.markdown(f"""
+        **Current Signal Phase:** `{current_phase}`  
+        **Selected Action:** `{current_action if current_action else 'None'}`  
+        **Epsilon (Exploration):** `{epsilon:.3f}`  
+        **Q-Table Size:** `{metrics.get('q_table_size', 0)}` entries
+        """)
+
+    with col2:
+        st.markdown("### Q-Values for Available Actions")
+
+        if q_values is not None:
+            # Get best action
+            best_idx = int(np.argmax(q_values))
+
+            for i, (action_name, q_val) in enumerate(zip(ACTIONS, q_values)):
+                is_best = (i == best_idx)
+                css_class = "q-value-card q-value-best" if is_best else "q-value-card"
+                indicator = "🏆 SELECTED" if is_best else ""
+                bar_color = "#4caf50" if is_best else "#2196f3"
+                bar_width = max(10, abs(q_val) * 50)  # Visual bar width
+
+                st.markdown(f"""
+                <div class="{css_class}">
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <span><b>{action_name}</b> {indicator}</span>
+                        <span style="font-weight: bold; color: {'#4caf50' if is_best else '#2196f3'};">
+                            {q_val:+.3f}
+                        </span>
+                    </div>
+                    <div style="background: #e0e0e0; height: 8px; border-radius: 4px; margin-top: 0.5rem;">
+                        <div style="background: {bar_color}; height: 100%; width: {min(100, bar_width)}%; border-radius: 4px;"></div>
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+        else:
+            st.info("No Q-values available yet. Start the simulation to see decisions.")
+
+    # Decision explanation
+    st.markdown("### 💡 Decision Explanation")
+
+    if current_action and q_values is not None:
+        best_idx = int(np.argmax(q_values))
+        best_action = ACTIONS[best_idx]
+
+        # Generate explanation based on actual state
+        n_vehicles = vehicle_counts[0] if len(vehicle_counts) > 0 else 0
+        s_vehicles = vehicle_counts[1] if len(vehicle_counts) > 1 else 0
+        e_vehicles = vehicle_counts[2] if len(vehicle_counts) > 2 else 0
+        w_vehicles = vehicle_counts[3] if len(vehicle_counts) > 3 else 0
+        n_peds = pedestrian_counts[0] if len(pedestrian_counts) > 0 else 0
+        s_peds = pedestrian_counts[1] if len(pedestrian_counts) > 1 else 0
+        e_peds = pedestrian_counts[2] if len(pedestrian_counts) > 2 else 0
+        w_peds = pedestrian_counts[3] if len(pedestrian_counts) > 3 else 0
+
+        ns_total = n_vehicles + s_vehicles
+        ew_total = e_vehicles + w_vehicles
+        total_peds = n_peds + s_peds + e_peds + w_peds
+
+        explanation_parts = []
+
+        if current_action == 'NS_GREEN':
+            explanation_parts.append(
+                f"North-South has {ns_total} total vehicles (N:{n_vehicles}, S:{s_vehicles}) "
+                f"vs East-West {ew_total} vehicles."
+            )
+        elif current_action == 'EW_GREEN':
+            explanation_parts.append(
+                f"East-West has {ew_total} total vehicles (E:{e_vehicles}, W:{w_vehicles}) "
+                f"vs North-South {ns_total} vehicles."
+            )
+        elif current_action and current_action.startswith('PEDESTRIAN'):
+            side = current_action[-1]
+            side_name = DIRECTION_NAMES.get(side, side)
+            side_peds = pedestrian_counts[['N', 'S', 'E', 'W'].index(side)] if side in ['N', 'S', 'E', 'W'] else 0
+            explanation_parts.append(
+                f"Pedestrian crossing activated for {side_name} side ({side_peds} waiting pedestrians)."
+            )
+        elif current_action == 'EXTEND_GREEN':
+            explanation_parts.append(
+                f"Extending current green phase ({current_phase}) to clear remaining queue."
+            )
+
+        if total_peds > 15:
+            explanation_parts.append(
+                f"High pedestrian demand detected ({total_peds} total waiting). "
+                f"Pedestrian crossing will be prioritized soon."
+            )
+
+        if metrics.get('emergency_active'):
+            explanation_parts.append(
+                f"🚨 Emergency vehicle detected in {metrics.get('emergency_dir', 'unknown')} direction - "
+                f"emergency override active."
+            )
+
+        explanation = " ".join(explanation_parts) if explanation_parts else \
+            "Agent is evaluating traffic conditions and selecting the optimal signal phase."
+
+        st.markdown(f"""
+        <div class="decision-box">
+            <b>Action:</b> {current_action}<br>
+            <b>Q-Value:</b> {q_values[ACTIONS.index(current_action)] if current_action in ACTIONS else 0:+.3f}<br>
+            <b>Explanation:</b> {explanation}
+        </div>
+        """, unsafe_allow_html=True)
+    else:
+        st.info("Start the simulation to see real-time decision explanations.")
 
 
 def render_metrics_cards(metrics):
@@ -210,12 +467,12 @@ def render_metrics_cards(metrics):
 
     with col1:
         st.markdown("### 🚗 Vehicles")
-        st.metric("Crossed", metrics.get('crossed_vehicles', 0), delta=None)
+        st.metric("Crossed", metrics.get('crossed_vehicles', 0))
         st.metric("In Queue", metrics.get('total_vehicles', 0))
 
     with col2:
         st.markdown("### 🚶 Pedestrians")
-        st.metric("Crossed", metrics.get('crossed_pedestrians', 0), delta=None)
+        st.metric("Crossed", metrics.get('crossed_pedestrians', 0))
         st.metric("Waiting", metrics.get('total_pedestrians', 0))
 
     with col3:
@@ -226,6 +483,7 @@ def render_metrics_cards(metrics):
     with col4:
         st.markdown("### ⏱️ Status")
         st.metric("Frame", metrics.get('frame', 0))
+        st.metric("Speed", f"{metrics.get('_speed_multiplier', 1.0)}x")
         if metrics.get('emergency_active'):
             st.markdown(
                 f'<div class="emergency-alert">'
@@ -249,7 +507,7 @@ def render_vehicle_chart(vehicle_counts, pedestrian_counts, chart_height):
     fig = go.Figure()
 
     fig.add_trace(go.Bar(
-        name='🚗 Vehicles',
+        name='🚗 Vehicles Waiting',
         x=directions,
         y=vehicle_counts,
         marker_color=['#FF6B6B', '#4ECDC4', '#45B7D1', '#FFA07A'],
@@ -258,7 +516,7 @@ def render_vehicle_chart(vehicle_counts, pedestrian_counts, chart_height):
     ))
 
     fig.add_trace(go.Bar(
-        name='🚶 Pedestrians',
+        name='🚶 Pedestrians Waiting',
         x=directions,
         y=pedestrian_counts,
         marker_color=['#98D8C8', '#F7DC6F', '#BB8FCE', '#85C1E9'],
@@ -267,12 +525,41 @@ def render_vehicle_chart(vehicle_counts, pedestrian_counts, chart_height):
     ))
 
     fig.update_layout(
-        title="📊 Traffic Distribution by Direction",
+        title="📊 Real-Time Traffic Distribution by Direction",
         xaxis_title="Direction",
         yaxis_title="Count",
         barmode='group',
         height=chart_height,
         showlegend=True,
+        plot_bgcolor='rgba(0,0,0,0)',
+        paper_bgcolor='rgba(0,0,0,0)',
+        font=dict(size=12),
+        margin=dict(l=50, r=50, t=80, b=50),
+    )
+
+    st.plotly_chart(fig, use_container_width=True)
+
+
+def render_crossed_chart(crossed_by_dir, chart_height):
+    """Render vehicles crossed by direction chart."""
+    directions = ['North', 'South', 'East', 'West']
+    crossed_values = [crossed_by_dir.get(d, 0) for d in DIRECTIONS]
+
+    fig = go.Figure(data=[
+        go.Bar(
+            x=directions,
+            y=crossed_values,
+            marker_color=['#FF6B6B', '#4ECDC4', '#45B7D1', '#FFA07A'],
+            text=crossed_values,
+            textposition='outside',
+        )
+    ])
+
+    fig.update_layout(
+        title="✅ Vehicles Crossed by Direction",
+        xaxis_title="Direction",
+        yaxis_title="Vehicles Crossed",
+        height=chart_height,
         plot_bgcolor='rgba(0,0,0,0)',
         paper_bgcolor='rgba(0,0,0,0)',
         font=dict(size=12),
@@ -310,7 +597,7 @@ def render_q_table_section(agent, chart_height):
         for (state, action), q_val in q_items:
             action_name = ACTIONS[action] if isinstance(action, int) else action
             q_data.append({
-                'State': str(state)[:60] + '...' if len(str(state)) > 60 else str(state),
+                'State': str(state)[:70] + '...' if len(str(state)) > 70 else str(state),
                 'Action': action_name,
                 'Q-Value': round(q_val, 3),
             })
@@ -355,8 +642,8 @@ def render_comparison_section(chart_height):
 
     col_btn, col_info = st.columns([1, 3])
     with col_btn:
-        if st.button("🔄 Run Fresh Comparison", type="primary", use_container_width=True):
-            st.session_state.comparison_data = None  # Reset to force recalculation
+        if st.button("🔄 Run Fresh Comparison", type="primary", use_container_width=True, key="btn_compare"):
+            st.session_state.comparison_data = None
             with st.spinner("Running AI simulation..."):
                 from traffic_sim.train import evaluate_agent
                 ai_metrics = evaluate_agent(frames=3000)
@@ -379,7 +666,6 @@ def render_comparison_section(chart_height):
     if st.session_state.comparison_data:
         cd = st.session_state.comparison_data
 
-        # Comparison chart
         metrics_names = ['Vehicles Crossed', 'Avg Waiting Time', 'Queue Length', 'Signal Changes']
 
         fig = go.Figure()
@@ -410,7 +696,6 @@ def render_comparison_section(chart_height):
         )
         st.plotly_chart(fig, use_container_width=True)
 
-        # Summary table
         st.markdown("### 📊 Summary Table")
         summary = pd.DataFrame({
             'Metric': metrics_names,
@@ -451,12 +736,12 @@ def render_training_section():
 
     with col1:
         st.markdown("### Training Configuration")
-        num_episodes = st.slider("Number of Episodes", 10, 500, 50, step=10)
-        frames_per_episode = st.slider("Frames per Episode", 500, 5000, 2000, step=500)
+        num_episodes = st.slider("Number of Episodes", 10, 500, 50, step=10, key="train_episodes")
+        frames_per_episode = st.slider("Frames per Episode", 500, 5000, 2000, step=500, key="train_frames")
 
     with col2:
         st.markdown("### Training Actions")
-        if st.button("🚀 Start Training", type="primary", use_container_width=True):
+        if st.button("🚀 Start Training", type="primary", use_container_width=True, key="btn_train"):
             with st.spinner(f"Training Q-Learning agent ({num_episodes} episodes...)"):
                 from traffic_sim.train import train_agent
                 agent = train_agent(
@@ -468,17 +753,20 @@ def render_training_section():
             st.success("✅ Training Complete! Model saved to models/q_table.npy")
             st.balloons()
 
-        if st.button("💾 Save Current Model", use_container_width=True):
+        if st.button("💾 Save Current Model", use_container_width=True, key="btn_save"):
             st.session_state.agent.save()
             st.success("✅ Model saved!")
 
-        if st.button("📂 Load Saved Model", use_container_width=True):
+        if st.button("📂 Load Saved Model", use_container_width=True, key="btn_load"):
             if st.session_state.agent.load():
                 st.success("✅ Model loaded successfully!")
             else:
                 st.warning("⚠️ No saved model found.")
 
-    # Scenario info
+        if st.button("🗑️ Reset Q-Table", use_container_width=True, key="btn_reset_q"):
+            st.session_state.agent.reset_q_table()
+            st.success("✅ Q-Table reset!")
+
     with st.expander("📋 Training Scenarios Covered", expanded=False):
         st.markdown("""
         The agent trains on diverse Indian traffic scenarios:
@@ -502,10 +790,15 @@ def main():
     # Sidebar controls
     params = render_sidebar()
 
+    # Apply speed multiplier to simulation if running
+    if st.session_state.simulation:
+        st.session_state.simulation.set_speed_multiplier(params['speed_multiplier'])
+
     # Main tabs
-    tab1, tab2, tab3, tab4 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5 = st.tabs([
         "📊 Live Simulation",
-        "🧠 Q-Learning Monitor",
+        "🚦 Traffic Statistics",
+        "🧠 RL Decision Monitor",
         "📈 Performance Comparison",
         "⚙️ Agent Training",
     ])
@@ -515,27 +808,27 @@ def main():
         st.markdown("## 📊 Live Traffic Simulation")
 
         # Control buttons
-        col_btn1, col_btn2, col_btn3, col_btn4 = st.columns(4)
+        col_btn1, col_btn2, col_btn3, col_btn4, col_btn5 = st.columns(5)
         with col_btn1:
-            if st.button("▶️ Start Simulation", type="primary", use_container_width=True):
+            if st.button("▶️ Start Simulation", type="primary", use_container_width=True, key="tab1_start"):
                 st.session_state.running = True
         with col_btn2:
-            if st.button("⏸️ Pause Simulation", use_container_width=True):
+            if st.button("⏸️ Pause Simulation", use_container_width=True, key="tab1_pause"):
                 st.session_state.running = False
         with col_btn3:
-            if st.button("🔄 Reset Simulation", use_container_width=True):
-                mode = 'train' if 'AI' in params['mode'] else 'fixed'
-                st.session_state.simulation = TrafficSimulation(
-                    mode=mode,
-                    spawn_prob=params['spawn_rate'],
-                    emergency_prob=params['emergency_prob'],
-                    pedestrian_prob=params['pedestrian_prob'],
-                    load_model=True
-                )
-                st.session_state.frame_count = 0
+            if st.button("🔄 Restart Simulation", use_container_width=True, key="tab1_restart"):
+                if st.session_state.simulation:
+                    st.session_state.simulation.reset(keep_q_table=True)
                 st.session_state.running = False
+                st.session_state.frame_count = 0
         with col_btn4:
-            st.session_state.auto_refresh = st.checkbox("🔁 Auto-Refresh", value=st.session_state.auto_refresh)
+            if st.button("📊 Reset Statistics", use_container_width=True, key="tab1_reset"):
+                if st.session_state.simulation:
+                    st.session_state.simulation.reset(keep_q_table=True)
+                st.session_state.running = False
+                st.session_state.frame_count = 0
+        with col_btn5:
+            st.session_state.auto_refresh = st.checkbox("🔁 Auto-Refresh", value=st.session_state.auto_refresh, key="tab1_autorefresh")
 
         st.markdown('<div class="section-divider"></div>', unsafe_allow_html=True)
 
@@ -547,7 +840,8 @@ def main():
                 spawn_prob=params['spawn_rate'],
                 emergency_prob=params['emergency_prob'],
                 pedestrian_prob=params['pedestrian_prob'],
-                load_model=True
+                load_model=True,
+                speed_multiplier=params['speed_multiplier']
             )
 
         sim = st.session_state.simulation
@@ -555,6 +849,8 @@ def main():
         # Run simulation step
         if st.session_state.running or st.session_state.auto_refresh:
             if 'AI' in params['mode']:
+                # Use per-direction multipliers for spawn rates
+                # For simplicity, use base spawn rate with per-direction modifiers applied in engine
                 state, info = sim.get_state_for_agent()
                 action = sim.agent.choose_action(
                     state,
@@ -567,26 +863,29 @@ def main():
 
         # Metrics cards
         result = sim._get_step_result()
+        result['_speed_multiplier'] = params['speed_multiplier']
         render_metrics_cards(result)
 
         st.markdown('<div class="section-divider"></div>', unsafe_allow_html=True)
 
-        # Simulation visualization placeholder
-        st.markdown("### 🎯 Intersection Visualization")
-        st.info("""
-        💡 **Simulation View:** Run `python main.py --eval` or `python main.py --train` 
-        to see the full Pygame 2D visualization with moving vehicles, traffic lights, 
-        zebra crossings, and emergency vehicles.
+        # Traffic statistics (direction-wise)
+        render_traffic_statistics(result)
 
-        The Streamlit dashboard shows real-time metrics, charts, and Q-Learning analytics.
-        """)
+        st.markdown('<div class="section-divider"></div>', unsafe_allow_html=True)
 
         # Vehicle distribution chart
         st.markdown("### 📊 Real-Time Traffic Distribution")
         render_vehicle_chart(
             result.get('vehicle_counts', [0, 0, 0, 0]),
             result.get('pedestrian_counts', [0, 0, 0, 0]),
-            params['chart_height']
+            params.get('chart_height', 400) if 'chart_height' in params else 400
+        )
+
+        # Crossed by direction chart
+        st.markdown("### ✅ Vehicles Crossed by Direction")
+        render_crossed_chart(
+            result.get('crossed_by_direction', {d: 0 for d in DIRECTIONS}),
+            params.get('chart_height', 400) if 'chart_height' in params else 400
         )
 
         # Emergency alert
@@ -606,21 +905,50 @@ def main():
             st.write(f"**Current Frame:** {st.session_state.frame_count}")
             st.write(f"**Running:** {'Yes' if st.session_state.running else 'No'}")
             st.write(f"**Auto-Refresh:** {'Yes' if st.session_state.auto_refresh else 'No'}")
+            st.write(f"**Speed Multiplier:** {params['speed_multiplier']}x")
             st.write(f"**Q-Table Size:** {len(sim.agent.q_table)} entries")
             st.write(f"**Epsilon:** {sim.agent.epsilon:.3f}")
+            st.write(f"**Vehicles Generated:** {sum(result.get('generated_by_direction', {}).values())}")
+            st.write(f"**Vehicles Crossed:** {result.get('crossed_vehicles', 0)}")
 
-    # ===================== TAB 2: Q-LEARNING MONITOR =====================
+    # ===================== TAB 2: TRAFFIC STATISTICS =====================
     with tab2:
-        render_q_table_section(st.session_state.agent, params['chart_height'])
-        st.markdown('<div class="section-divider"></div>', unsafe_allow_html=True)
-        render_reward_weights()
+        st.markdown("## 🚦 Detailed Traffic Statistics")
 
-    # ===================== TAB 3: PERFORMANCE COMPARISON =====================
+        result = sim._get_step_result() if st.session_state.simulation else {
+            'vehicle_counts': [0, 0, 0, 0],
+            'pedestrian_counts': [0, 0, 0, 0],
+            'crossed_by_direction': {d: 0 for d in DIRECTIONS},
+            'generated_by_direction': {d: 0 for d in DIRECTIONS},
+            'crossed_vehicles': 0,
+            'crossed_pedestrians': 0,
+            'total_vehicles': 0,
+            'total_pedestrians': 0,
+            'total_vehicle_waiting': 0,
+        }
+        render_traffic_statistics(result)
+
+    # ===================== TAB 3: RL DECISION MONITOR =====================
     with tab3:
-        render_comparison_section(params['chart_height'])
+        result = sim._get_step_result() if st.session_state.simulation else {
+            'vehicle_counts': [0, 0, 0, 0],
+            'pedestrian_counts': [0, 0, 0, 0],
+            'phase': 'NS_GREEN',
+            'action': None,
+            'q_values': None,
+            'epsilon': 0.4,
+            'q_table_size': 0,
+            'emergency_active': False,
+        }
+        render_rl_decision_monitor(result, st.session_state.agent)
 
-    # ===================== TAB 4: AGENT TRAINING =====================
+    # ===================== TAB 4: PERFORMANCE COMPARISON =====================
     with tab4:
+        chart_height = params.get('chart_height', 400) if 'chart_height' in params else 400
+        render_comparison_section(chart_height)
+
+    # ===================== TAB 5: AGENT TRAINING =====================
+    with tab5:
         render_training_section()
 
     # Footer

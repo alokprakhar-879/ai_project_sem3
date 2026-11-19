@@ -166,3 +166,13 @@ class QLearningAgent:
             'total_updates': self.total_updates,
             'avg_reward_last_100': np.mean(self.training_rewards[-100:]) if self.training_rewards else 0,
         }
+
+    def get_q_values_for_state(self, state):
+        """Get all Q-values for a given state (for decision monitor display)."""
+        return [self.get_q_value(state, a) for a in range(self.num_actions)]
+
+    def get_best_action_for_state(self, state):
+        """Get the best action and its Q-value for a given state."""
+        q_values = self.get_q_values_for_state(state)
+        best_idx = int(np.argmax(q_values))
+        return best_idx, q_values[best_idx], q_values

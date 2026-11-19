@@ -24,11 +24,12 @@ class TrafficSimulation:
     def __init__(self, mode='train', spawn_prob=BASE_SPAWN_PROB,
                  emergency_prob=EMERGENCY_SPAWN_PROB,
                  pedestrian_prob=PEDESTRIAN_SPAWN_PROB,
-                 load_model=False):
+                 load_model=False, speed_multiplier=1.0):
         self.mode = mode
         self.spawn_prob = spawn_prob
         self.emergency_prob = emergency_prob
         self.pedestrian_prob = pedestrian_prob
+        self.speed_multiplier = speed_multiplier
 
         # Initialize modules
         self.intersection = Intersection()
@@ -58,16 +59,33 @@ class TrafficSimulation:
             'signal_changes': 0,
             'emergency_crossed': 0,
             'total_reward': 0,
+            'crossed_by_direction': {d: 0 for d in DIRECTIONS},
+            'generated_by_direction': {d: 0 for d in DIRECTIONS},
         }
 
         # Reward tracking per step
         self.step_rewards = []
+        self.step_details = []  # For decision monitor
 
         # Initialize first phase
         self.intersection.set_phase('NS_GREEN')
 
-    def reset(self):
-        """Reset simulation for new episode."""
+    def reset(self, keep_q_table=True):
+        """Reset simulation for new episode.
+
+        Args:
+            keep_q_table: If True, preserve the trained Q-Table.
+        """
+        # Save Q-table if we need to keep it
+        q_table_backup = None
+        if keep_q_table:
+            q_table_backup = dict(self.agent.q_table)
+            lr_backup = self.agent.learning_rate
+            gamma_backup = self.agent.discount_factor
+            epsilon_backup = self.agent.epsilon
+            episodes_backup = self.agent.training_episodes
+
+        # Reinitialize modules
         self.intersection = Intersection()
         self.state_manager = TrafficStateManager()
         self.frame = 0
@@ -82,9 +100,71 @@ class TrafficSimulation:
             'signal_changes': 0,
             'emergency_crossed': 0,
             'total_reward': 0,
+            'crossed_by_direction': {d: 0 for d in DIRECTIONS},
+            'generated_by_direction': {d: 0 for d in DIRECTIONS},
         }
         self.step_rewards = []
+        self.step_details = []
         self.intersection.set_phase('NS_GREEN')
+
+        # Restore Q-table if needed
+        if keep_q_table and q_table_backup is not None:
+            self.agent.q_table = q_table_backup
+            self.agent.learning_rate = lr_backup
+            self.agent.discount_factor = gamma_backup
+            self.agent.epsilon = epsilon_backup
+            self.agent.training_episodes = episodes_backup
+
+    def reset_q_table(self):
+        """Reset the Q-Table completely (fresh training)."""
+        self.agent.q_table = {}
+        self.agent.training_episodes = 0
+        self.agent.total_updates = 0
+        self.agent.training_rewards = []
+        self.agent.epsilon = EPSILON_START
+
+    def set_speed_multiplier(self, multiplier):
+        """Set simulation speed multiplier."""
+        self.speed_multiplier = multiplier
+
+    def get_state_for_agent(self):
+        """Get current state for Q-Learning agent (tuple key) without updating.
+
+        The intersection has already been updated by step(). This method just
+        computes the Q-Learning state key from the current intersection state.
+        """
+        info = self._get_current_info()
+
+        # Collect detailed state for monitoring
+        state_dict = self.state_manager.collect_state(
+            self.intersection, info['current_phase']
+        )
+
+        # Convert to Q-Learning state key (tuple)
+        vehicle_counts = info.get('vehicle_counts', [0, 0, 0, 0])
+        pedestrian_counts = info.get('pedestrian_counts', [0, 0, 0, 0])
+        emergency_active = info.get('emergency_active', False)
+        current_phase = info.get('current_phase', 'NS_GREEN')
+
+        q_state = self.agent.get_state(
+            vehicle_counts, pedestrian_counts, emergency_active, current_phase
+        )
+
+        return q_state, state_dict, info
+
+    def _get_current_info(self):
+        """Get current intersection info without calling update again."""
+        return {
+            'emergency_active': self.intersection.emergency_override_active,
+            'emergency_dir': self.intersection.get_emergency_direction(),
+            'current_phase': self.intersection.current_phase,
+            'vehicle_counts': self.intersection.get_vehicle_counts(),
+            'pedestrian_counts': self.intersection.get_pedestrian_counts(),
+            'crossed_by_direction': self.intersection.get_crossed_by_direction(),
+            'generated_by_direction': self.intersection.get_generated_counts(),
+            'current_vehicle_waiting': self.intersection.get_total_waiting(),
+            'current_pedestrian_waiting': self.intersection.get_total_pedestrian_waiting(),
+        }
 
     def step(self, action=None):
         """
@@ -104,7 +184,8 @@ class TrafficSimulation:
 
         # Update intersection (spawn, move vehicles/pedestrians, update lights)
         info = self.intersection.update(
-            self.spawn_prob, self.emergency_prob, self.pedestrian_prob
+            self.spawn_prob, self.emergency_prob, self.pedestrian_prob,
+            speed_multiplier=self.speed_multiplier
         )
 
         # Collect state for monitoring
@@ -152,6 +233,24 @@ class TrafficSimulation:
                 )
                 self.step_rewards.append(step_reward)
 
+                # Record step details for decision monitor
+                q_values = [self.agent.get_q_value(self.prev_state, a)
+                           for a in range(self.agent.num_actions)]
+                self.step_details.append({
+                    'frame': self.frame - 1,
+                    'state': self.prev_state,
+                    'action': self.prev_action,
+                    'action_name': ACTIONS[self.prev_action] if self.prev_action is not None else None,
+                    'reward': step_reward,
+                    'q_values': q_values,
+                    'vehicle_counts': self._get_prev_info().get('vehicle_counts', [0, 0, 0, 0]),
+                    'pedestrian_counts': self._get_prev_info().get('pedestrian_counts', [0, 0, 0, 0]),
+                    'epsilon': self.agent.epsilon,
+                })
+                # Keep only last 50 details
+                if len(self.step_details) > 50:
+                    self.step_details = self.step_details[-50:]
+
                 # Q-Learning update
                 if self.mode == 'train':
                     self.agent.update(
@@ -173,7 +272,6 @@ class TrafficSimulation:
 
             if allowed:
                 self.intersection._apply_action(action_idx)
-            # else: keep current phase
 
         # Track metrics
         crossed_this_step = self.intersection.crossed_vehicles - self.episode_metrics['vehicles_crossed']
@@ -185,6 +283,10 @@ class TrafficSimulation:
         self.episode_metrics['total_pedestrian_waiting'] = self.intersection.total_pedestrian_waiting
         self.episode_metrics['signal_changes'] = self.intersection.signal_changes
         self.episode_metrics['emergency_crossed'] = self.intersection.emergency_crossed
+        self.episode_metrics['crossed_by_direction'] = dict(
+            self.intersection.crossed_by_direction)
+        self.episode_metrics['generated_by_direction'] = dict(
+            self.intersection.generated_by_direction)
 
         self.frame += 1
 
@@ -208,6 +310,8 @@ class TrafficSimulation:
         return getattr(self, '_prev_info', {
             'current_vehicle_waiting': 0,
             'current_pedestrian_waiting': 0,
+            'vehicle_counts': [0, 0, 0, 0],
+            'pedestrian_counts': [0, 0, 0, 0],
         })
 
     def _get_step_result(self, step_info=None, crossed_vehicles=0, crossed_pedestrians=0):
@@ -215,11 +319,21 @@ class TrafficSimulation:
         vehicle_counts = self.intersection.get_vehicle_counts()
         pedestrian_counts = self.intersection.get_pedestrian_counts()
 
+        # Get Q-values for current state (for decision monitor)
+        current_q_values = None
+        current_action_name = None
+        if self.prev_state is not None:
+            current_q_values = [self.agent.get_q_value(self.prev_state, a)
+                               for a in range(self.agent.num_actions)]
+            current_action_name = ACTIONS[self.current_action] if self.current_action is not None else None
+
         return {
             'frame': self.frame,
             'phase': self.intersection.current_phase,
             'vehicle_counts': vehicle_counts,
             'pedestrian_counts': pedestrian_counts,
+            'crossed_by_direction': self.intersection.crossed_by_direction.copy(),
+            'generated_by_direction': self.intersection.generated_by_direction.copy(),
             'total_vehicles': sum(vehicle_counts),
             'total_pedestrians': sum(pedestrian_counts),
             'crossed_vehicles': self.intersection.crossed_vehicles,
@@ -227,8 +341,10 @@ class TrafficSimulation:
             'emergency_active': step_info.get('emergency_active', False) if step_info else False,
             'emergency_dir': step_info.get('emergency_dir', None) if step_info else None,
             'epsilon': self.agent.epsilon,
-            'action': ACTIONS[self.current_action] if self.current_action is not None else None,
+            'action': current_action_name,
+            'q_values': current_q_values,
             'q_table_size': len(self.agent.q_table),
+            'step_details': self.step_details[-10:] if self.step_details else [],
         }
 
     def draw(self, screen):
@@ -236,15 +352,19 @@ class TrafficSimulation:
         self.intersection.draw(screen)
 
         # Draw mode indicator
-        font = pygame.font.SysFont(None, 20, bold=True)
+        font = pygame.font.SysFont(None, 22, bold=True)
         mode_text = font.render(f"Mode: {self.mode.upper()}", True, NAVY)
         screen.blit(mode_text, (20, 20))
 
+        # Draw speed indicator
+        speed_text = font.render(f"Speed: {self.speed_multiplier}x", True, NAVY)
+        screen.blit(speed_text, (20, 50))
+
         # Draw emergency alert
         if self.intersection.emergency_override_active:
-            alert_font = pygame.font.SysFont(None, 24, bold=True)
+            alert_font = pygame.font.SysFont(None, 26, bold=True)
             alert = alert_font.render("EMERGENCY VEHICLE PRIORITY ACTIVE", True, RED)
-            screen.blit(alert, (WINDOW_WIDTH // 2 - 200, 20))
+            screen.blit(alert, (WINDOW_WIDTH // 2 - 220, 20))
 
     def end_episode(self):
         """End current training episode and update agent metrics."""

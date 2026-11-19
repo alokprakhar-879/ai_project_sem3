@@ -1,15 +1,16 @@
 # Traffic Simulation Configuration - Indian Traffic Context
 
 # Window settings
-WINDOW_WIDTH = 1200
-WINDOW_HEIGHT = 800
-FPS = 30
+WINDOW_WIDTH = 1400
+WINDOW_HEIGHT = 900
+FPS = 60
 
 # Colors
 WHITE = (255, 255, 255)
 BLACK = (0, 0, 0)
 GRAY = (128, 128, 128)
 DARK_GRAY = (60, 60, 60)
+ROAD_GRAY = (90, 90, 90)
 RED = (255, 0, 0)
 YELLOW = (255, 255, 0)
 GREEN = (0, 255, 0)
@@ -20,23 +21,33 @@ PURPLE = (128, 0, 128)
 LIGHT_GREEN = (144, 238, 144)
 NAVY = (0, 0, 128)
 AMBER = (255, 191, 0)
+ZEBRA_WHITE = (255, 255, 255)
+STOP_LINE_COLOR = (255, 255, 255)
 
 # Intersection geometry
-INTERSECTION_X = 600
-INTERSECTION_Y = 400
-ROAD_WIDTH = 90
-INTERSECTION_SIZE = 150
+INTERSECTION_X = 700
+INTERSECTION_Y = 450
+ROAD_WIDTH = 100
+INTERSECTION_SIZE = 180
+
+# Lane positions within each road (offset from center for multiple lanes)
+LANE_OFFSETS = {
+    'N': [-25, 0, 25],   # Three lanes for North-bound
+    'S': [-25, 0, 25],   # Three lanes for South-bound
+    'E': [-25, 0, 25],   # Three lanes for East-bound
+    'W': [-25, 0, 25],   # Three lanes for West-bound
+}
 
 # Vehicle categories (Indian traffic)
 VEHICLE_TYPES = {
-    'car': {'length': 20, 'width': 12, 'speed': 2.8, 'color': (100, 150, 255)},
-    'motorcycle': {'length': 12, 'width': 8, 'speed': 3.2, 'color': (200, 100, 255)},
-    'scooter': {'length': 14, 'width': 9, 'speed': 3.0, 'color': (255, 100, 100)},
-    'auto_rickshaw': {'length': 16, 'width': 10, 'speed': 2.6, 'color': (255, 200, 0)},
-    'bus': {'length': 32, 'width': 14, 'speed': 2.2, 'color': (255, 0, 0)},
-    'truck': {'length': 36, 'width': 14, 'speed': 2.0, 'color': (100, 100, 100)},
-    'ambulance': {'length': 24, 'width': 12, 'speed': 3.5, 'color': (255, 255, 255)},
-    'police': {'length': 22, 'width': 12, 'speed': 3.4, 'color': (0, 0, 200)},
+    'car': {'length': 24, 'width': 14, 'base_speed': 2.5, 'color': (100, 150, 255), 'accel': 0.15, 'decel': 0.25},
+    'motorcycle': {'length': 14, 'width': 9, 'base_speed': 3.0, 'color': (200, 100, 255), 'accel': 0.2, 'decel': 0.3},
+    'scooter': {'length': 16, 'width': 10, 'base_speed': 2.8, 'color': (255, 100, 100), 'accel': 0.18, 'decel': 0.28},
+    'auto_rickshaw': {'length': 18, 'width': 11, 'base_speed': 2.4, 'color': (255, 200, 0), 'accel': 0.14, 'decel': 0.22},
+    'bus': {'length': 36, 'width': 16, 'base_speed': 2.0, 'color': (220, 20, 60), 'accel': 0.1, 'decel': 0.18},
+    'truck': {'length': 40, 'width': 16, 'base_speed': 1.8, 'color': (100, 100, 100), 'accel': 0.08, 'decel': 0.15},
+    'ambulance': {'length': 26, 'width': 14, 'base_speed': 3.2, 'color': (255, 255, 255), 'accel': 0.25, 'decel': 0.35},
+    'police': {'length': 24, 'width': 14, 'base_speed': 3.1, 'color': (0, 0, 200), 'accel': 0.22, 'decel': 0.32},
 }
 
 EMERGENCY_TYPES = {'ambulance', 'police'}
@@ -44,20 +55,30 @@ EMERGENCY_TYPES = {'ambulance', 'police'}
 # Directions
 DIRECTIONS = ['N', 'S', 'E', 'W']
 DIRECTION_NAMES = {'N': 'North', 'S': 'South', 'E': 'East', 'W': 'West'}
+DIRECTION_OPPOSITE = {'N': 'S', 'S': 'N', 'E': 'W', 'W': 'E'}
 
-# Traffic light timing
-LIGHT_RADIUS = 14
-MIN_GREEN_TIME = 30      # frames (~1 second at 30fps)
-MAX_GREEN_TIME = 180     # frames (~6 seconds)
-YELLOW_TIME = 15         # frames
-ALL_RED_TIME = 10        # frames
-PEDESTRIAN_CROSS_TIME = 90  # frames (~3 seconds)
-GREEN_TIME = 60          # frames for fixed-time baseline
+# Traffic light timing (configurable)
+LIGHT_RADIUS = 16
+MIN_GREEN_TIME = 45      # frames (~1.5 seconds at 30fps)
+MAX_GREEN_TIME = 300     # frames (~10 seconds)
+YELLOW_TIME = 20         # frames
+ALL_RED_TIME = 15        # frames
+PEDESTRIAN_CROSS_TIME = 120  # frames (~4 seconds)
+GREEN_TIME = 120         # frames for fixed-time baseline
+
+# Simulation speed presets (multiplier applied to base speed)
+SPEED_PRESETS = {
+    '0.25x': 0.25,
+    '0.5x': 0.5,
+    '1x': 1.0,
+    '2x': 2.0,
+}
+DEFAULT_SPEED_PRESET = '1x'
 
 # Spawn rates
-BASE_SPAWN_PROB = 0.03
-PEDESTRIAN_SPAWN_PROB = 0.02
-EMERGENCY_SPAWN_PROB = 0.005
+BASE_SPAWN_PROB = 0.04
+PEDESTRIAN_SPAWN_PROB = 0.03
+EMERGENCY_SPAWN_PROB = 0.008
 
 # Q-Learning parameters
 LEARNING_RATE = 0.15
@@ -97,3 +118,9 @@ REWARD_CONFLICT = -20.0
 Q_TABLE_PATH = 'models/q_table.npy'
 METRICS_PATH = 'data/metrics.csv'
 COMPARISON_PATH = 'data/comparison.csv'
+
+# Safe following distance (in pixels)
+SAFE_FOLLOWING_DISTANCE = 40
+
+# Stop line buffer (distance before stop line where vehicle should begin slowing)
+SLOW_DOWN_DISTANCE = 60
